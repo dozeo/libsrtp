@@ -42,7 +42,7 @@
  *
  */
 
-#include "config.h"
+#include "srtp/config.h"
 #include "srtp/crypto/rand_source.h"
 
 #ifdef DEV_URANDOM

@@ -50,10 +50,10 @@
 extern "C" {
 #endif
 
-#include "srtp/crypto/crypto_kernel.h"
-#include "srtp/crypto/rdbx.h"
-#include "srtp/crypto/rdb.h"
-#include "srtp/crypto/integers.h"
+#include "crypto/crypto_kernel.h"
+#include "crypto/rdbx.h"
+#include "crypto/rdb.h"
+#include "crypto/integers.h"
 
 /**
  * @defgroup SRTP Secure RTP

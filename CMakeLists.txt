@@ -126,7 +126,7 @@ set(PACKAGE_VERSION "${VERSION}")
 set(PACKAGE_STRING "${PACKAGE_NAME}_${VERSION}")
 
 configure_file(config.h.cmake.in
-	"${CMAKE_BINARY_DIR}/config.h")
+	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h")
 
 # ---- End of checks
 set(libtype STATIC)
@@ -170,13 +170,14 @@ set(internal_hdrs
 	"include/srtp/crypto/aes.h"
 	"include/srtp/crypto/aes_cbc.h"
 	"include/srtp/crypto/aes_icm.h"
-	"${CMAKE_BINARY_DIR}/config.h"
+	"include/srtp/crypto/integers.h"
+	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h"
 	)
 
 set(hdrs
 	"include/srtp/srtp.h")
 
-list(APPEND include_dirs "${CMAKE_BINARY_DIR}/.")
+list(APPEND include_dirs "${CMAKE_CURRENT_BINARY_DIR}/include")
 list(APPEND include_dirs "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 if(WIN32)
