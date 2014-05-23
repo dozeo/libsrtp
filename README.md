@@ -1,4 +1,5 @@
 Secure RTP (SRTP) and UST Reference Implementations
+=
 
 David A. McGrew
 
@@ -22,7 +23,7 @@ Some notable modifications were done on this package, listed below:
  * docs are still being build with a makefile
  * include path of "config.h" has been changed in all source and header files; it is now "srtp/config.h"
 
-* The include files have been moved and the source files changed to reflect this change. This is to accomodate local project inclusion (using sub_directory(vendor/libsrtp) in cmake; see example below)
+* The include files have been moved and the source files changed to reflect this change. This is to accomodate local project inclusion (using it via a `sub_directory` in cmake; see example below)
 
 * installation in the system is currently not possible; I've only tested the static library output so far
 
@@ -31,9 +32,9 @@ Some notable modifications were done on this package, listed below:
 This is because it is meant to be used locally to your project and not installed on the system; I might change it to make it possible to do a cmake install as well, but not now.
 
 so assuming:
-* your project dependencies in a directory called `vendor`
-* cmake variable `${libraries}` is being used in `target_link_libraries()`
-* cmake variable `${include_dirs}` is being using in `set_target_properties(myproj INCLUDE_DIRECTORIES ${include_dirs})`
+* your project dependencies are in a directory called `vendor`
+* the cmake variable `${libraries}` is being used in `target_link_libraries()`
+* the cmake variable `${include_dirs}` is being used as `set_target_properties(myproj INCLUDE_DIRECTORIES)`
 
 in your CMakeLists.txt:
 * `add_subdirectory(vendor/libsrtp)`
