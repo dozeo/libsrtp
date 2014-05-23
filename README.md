@@ -52,13 +52,13 @@ int main(int argc, char** argv)
 	srtp_t session;
 	srtp_policy_t policy;
 	uint8_t key[30];
+	
+	srtp_init();
 
 	crypto_policy_set_rtp_default(&policy.rtp);
 	crypto_policy_set_rtcp_default(&policy.rtcp);
 
 	crypto_get_random(key, 30);
-
-	srtp_init();
 
 	...
 }
