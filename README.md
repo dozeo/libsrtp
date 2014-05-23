@@ -1,15 +1,24 @@
 Secure RTP (SRTP) and UST Reference Implementations
+
 David A. McGrew
+
 Cisco Systems, Inc.
+
 mcgrew@cisco.com
 
 
 This package provides an implementation of the Secure Real-time
+
 Transport Protocol (SRTP), the Universal Security Transform (UST), and
+
 a supporting cryptographic kernel.  These mechanisms are documented in
+
 the Internet Drafts in the doc/ subdirectory.  The SRTP API is
+
 documented in include/srtp.h, and the library is in libsrtp.a (after
+
 compilation).
+
 
 Some notable modifications were done on this package, listed below:
 
