@@ -7,7 +7,7 @@
 #cmakedefine CPU_RISC 1
 
 /* Path to random device */
-#cmakedefine DEV_URANDOM "@dev_urandom@"
+#cmakedefine DEV_URANDOM "@DEV_URANDOM@"
 
 /* Define to compile in dynamic debugging system. */
 #cmakedefine ENABLE_DEBUGGING
@@ -145,7 +145,7 @@
 #cmakedefine SRTP_KERNEL_LINUX
 
 /* Define to 1 if you have the ANSI C header files. */
-#cmakedefine STDC_HEADERS
+#cmakedefine STDC_HEADERS 1
 
 /* Write errors to this file */
 #cmakedefine USE_ERR_REPORTING_FILE
