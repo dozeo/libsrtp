@@ -10,7 +10,7 @@
 
 /*
  *	
- * Copyright (c) 2001-2005, Cisco Systems, Inc.
+ * Copyright (c) 2001-2006,2013 Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -53,7 +53,7 @@
 extern debug_module_t mod_cipher;
 
 err_status_t
-null_cipher_alloc(cipher_t **c, int key_len) {
+null_cipher_alloc(cipher_t **c, int key_len, int tlen) {
   extern cipher_type_t null_cipher;
   uint8_t *pointer;
   
@@ -61,12 +61,13 @@ null_cipher_alloc(cipher_t **c, int key_len) {
 	      "allocating cipher with key length %d", key_len);
 
   /* allocate memory a cipher of type null_cipher */
-  pointer = crypto_alloc(sizeof(null_cipher_ctx_t) + sizeof(cipher_t));
+  pointer = (uint8_t*)crypto_alloc(sizeof(null_cipher_ctx_t) + sizeof(cipher_t));
   if (pointer == NULL)
     return err_status_alloc_fail;
 
   /* set pointers */
   *c = (cipher_t *)pointer;
+  (*c)->algorithm = NULL_CIPHER;
   (*c)->type = &null_cipher;
   (*c)->state = pointer + sizeof(cipher_t);
 
@@ -99,7 +100,7 @@ null_cipher_dealloc(cipher_t *c) {
 }
 
 err_status_t
-null_cipher_init(null_cipher_ctx_t *ctx, const uint8_t *key) {
+null_cipher_init(null_cipher_ctx_t *ctx, const uint8_t *key, int key_len) {
 
   debug_print(mod_cipher, "initializing null cipher", NULL);
 
@@ -129,6 +130,9 @@ null_cipher_test_0 = {
   NULL,              /* plaintext                */
   0,                 /* octets in plaintext      */
   NULL,              /* ciphertext               */
+  0,
+  NULL,
+  0,
   NULL               /* pointer to next testcase */
 };
 
@@ -141,12 +145,15 @@ cipher_type_t null_cipher = {
   (cipher_alloc_func_t)         null_cipher_alloc,
   (cipher_dealloc_func_t)       null_cipher_dealloc,
   (cipher_init_func_t)          null_cipher_init,
+  (cipher_set_aad_func_t)       0,
   (cipher_encrypt_func_t)       null_cipher_encrypt,
   (cipher_decrypt_func_t)       null_cipher_encrypt,
   (cipher_set_iv_func_t)        null_cipher_set_iv,
+  (cipher_get_tag_func_t)       0,
   (char *)                      null_cipher_description,
   (int)                         0,
   (cipher_test_case_t *)       &null_cipher_test_0,
-  (debug_module_t *)            NULL
+  (debug_module_t *)            NULL,
+  (cipher_type_id_t)            NULL_CIPHER
 };
 

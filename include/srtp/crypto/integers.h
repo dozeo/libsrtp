@@ -9,7 +9,7 @@
 
 /*
  *	
- * Copyright (c) 2001-2005, Cisco Systems, Inc.
+ * Copyright (c) 2001-2006, Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -100,7 +100,6 @@ typedef unsigned int		uint32_t;
 
 
 #ifdef NO_64BIT_MATH
-//#error "why are we here?"
 typedef double uint64_t;
 /* assert that sizeof(double) == 8 */
 extern uint64_t make64(uint32_t high, uint32_t low);
@@ -114,7 +113,7 @@ extern uint32_t low32(uint64_t value);
    addresses.  This is required for processors that do not allow unaligned
    loads. */
 #ifdef ALIGNMENT_32BIT_REQUIRED
-// Note that if it's in a variable, you can memcpy it
+/* Note that if it's in a variable, you can memcpy it */
 #ifdef WORDS_BIGENDIAN
 #define PUT_32(addr,value) \
     { \

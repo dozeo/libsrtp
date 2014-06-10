@@ -8,7 +8,7 @@
  */
 /*
  *	
- * Copyright (c) 2001-2005 Cisco Systems, Inc.
+ * Copyright (c) 2001-2006 Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -73,8 +73,9 @@ crypto_alloc(size_t size) {
 
   if (ptr) {
     debug_print(mod_alloc, "(location: %p) allocated", ptr);
-  } else
+  } else {
     debug_print(mod_alloc, "allocation failed (asked for %d bytes)\n", size);
+  }
 
   return ptr;
 }

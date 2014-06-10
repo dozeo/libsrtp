@@ -8,7 +8,7 @@
  */
 /*
  *	
- * Copyright (c) 2001-2005, Cisco Systems, Inc.
+ * Copyright (c) 2001-2006, Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -91,6 +91,17 @@ extern "C" {
  */
 #define SRTP_MAX_TRAILER_LEN SRTP_MAX_TAG_LEN 
 
+/*
+ * SRTP_AEAD_SALT_LEN is the length of the SALT values used with 
+ * GCM mode.  GCM mode requires an IV.  The SALT value is used
+ * as part of the IV formation logic applied to each RTP packet.
+ */
+#define SRTP_AEAD_SALT_LEN	12
+#define AES_128_GCM_KEYSIZE_WSALT   SRTP_AEAD_SALT_LEN + 16
+#define AES_192_GCM_KEYSIZE_WSALT   SRTP_AEAD_SALT_LEN + 24
+#define AES_256_GCM_KEYSIZE_WSALT   SRTP_AEAD_SALT_LEN + 32
+
+
 /* 
  * nota bene: since libSRTP doesn't support the use of the MKI, the
  * SRTP_MAX_TRAILER_LEN value is just the maximum tag length
@@ -167,8 +178,20 @@ typedef enum {
 
 typedef struct { 
   ssrc_type_t type;   /**< The type of this particular SSRC */
-  uint32_t value;     /**< The value of this SSRC, if it is not a wildcard */
+  unsigned int value; /**< The value of this SSRC, if it is not a wildcard */
 } ssrc_t;
+
+
+/**
+ * @brief points to an EKT policy
+ */
+typedef struct ekt_policy_ctx_t *ekt_policy_t;
+
+
+/**
+ * @brief points to EKT stream data
+ */
+typedef struct ekt_stream_ctx_t *ekt_stream_t;
 
 
 /** 
@@ -206,8 +229,18 @@ typedef struct srtp_policy_t {
 			      */
   crypto_policy_t rtp;         /**< SRTP crypto policy.                  */
   crypto_policy_t rtcp;        /**< SRTCP crypto policy.                 */
-  uint8_t *key;                /**< Pointer to the SRTP master key for
+  unsigned char *key;          /**< Pointer to the SRTP master key for
 				*    this stream.                        */
+  ekt_policy_t ekt;            /**< Pointer to the EKT policy structure
+                                *   for this stream (if any)             */ 
+  unsigned long window_size;   /**< The window size to use for replay
+				*   protection. */
+  int        allow_repeat_tx;  /**< Whether retransmissions of
+				*   packets with the same sequence number
+				*   are allowed.  (Note that such repeated
+				*   transmissions must have the same RTP
+				*   payload, or a severe security weakness
+				*   is introduced!)                      */
   struct srtp_policy_t *next;  /**< Pointer to next stream policy.       */
 } srtp_policy_t;
 
@@ -257,6 +290,15 @@ err_status_t
 srtp_init(void);
 
 /**
+ * @brief srtp_shutdown() de-initializes the srtp library.
+ *
+ * @warning No srtp functions may be called after calling this function.
+ */
+
+err_status_t
+srtp_shutdown(void);
+
+/**
  * @brief srtp_protect() is the Secure RTP sender-side packet processing
  * function.
  * 
@@ -276,6 +318,11 @@ srtp_init(void);
  * packet, and assumes that the RTP packet is aligned on a 32-bit
  * boundary.
  *
+ * @warning This function assumes that it can write SRTP_MAX_TRAILER_LEN 
+ * into the location in memory immediately following the RTP packet.   
+ * Callers MUST ensure that this much writable memory is available in 
+ * the buffer that holds the RTP packet.
+ * 
  * @param ctx is the SRTP context to use in processing the packet.
  *
  * @param rtp_hdr is a pointer to the RTP packet (before the call); after
@@ -409,7 +456,7 @@ srtp_add_stream(srtp_t session,
  */
 
 err_status_t
-srtp_remove_stream(srtp_t session, uint32_t ssrc);
+srtp_remove_stream(srtp_t session, unsigned int ssrc);
 
 /**
  * @brief crypto_policy_set_rtp_default() sets a crypto policy
@@ -463,8 +510,8 @@ crypto_policy_set_rtcp_default(crypto_policy_t *p);
  * 
  * The function crypto_policy_set_aes_cm_128_hmac_sha1_80() is a
  * synonym for crypto_policy_set_rtp_default().  It conforms to the
- * naming convention used in
- * http://www.ietf.org/internet-drafts/draft-ietf-mmusic-sdescriptions-12.txt
+ * naming convention used in RFC 4568 (SDP Security Descriptions for
+ * Media Streams).
  * 
  * @return void.
  * 
@@ -481,8 +528,8 @@ crypto_policy_set_rtcp_default(crypto_policy_t *p);
  * 
  * The function call crypto_policy_set_aes_cm_128_hmac_sha1_32(&p)
  * sets the crypto_policy_t at location p to use policy
- * AES_CM_128_HMAC_SHA1_32 as defined in
- * draft-ietf-mmusic-sdescriptions-12.txt.  This policy uses AES-128
+ * AES_CM_128_HMAC_SHA1_32 as defined in RFC 4568.
+ * This policy uses AES-128
  * Counter Mode encryption and HMAC-SHA1 authentication, with an
  * authentication tag that is only 32 bits long.  This length is
  * considered adequate only for protecting audio and video media that
@@ -567,6 +614,242 @@ crypto_policy_set_aes_cm_128_null_auth(crypto_policy_t *p);
 void
 crypto_policy_set_null_cipher_hmac_sha1_80(crypto_policy_t *p);
 
+
+/**
+ * @brief crypto_policy_set_aes_cm_256_hmac_sha1_80() sets a crypto
+ * policy structure to a encryption and authentication policy using AES-256 
+ * for RTP protection.
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_aes_cm_256_hmac_sha1_80(&p)
+ * sets the crypto_policy_t at location p to use policy
+ * AES_CM_256_HMAC_SHA1_80 as defined in
+ * draft-ietf-avt-srtp-big-aes-03.txt.  This policy uses AES-256
+ * Counter Mode encryption and HMAC-SHA1 authentication, with an 80 bit
+ * authentication tag.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @return void.
+ * 
+ */
+
+void crypto_policy_set_aes_cm_256_hmac_sha1_80(crypto_policy_t *p);
+
+
+/**
+ * @brief crypto_policy_set_aes_cm_256_hmac_sha1_32() sets a crypto
+ * policy structure to a short-authentication tag policy using AES-256
+ * encryption.
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_aes_cm_256_hmac_sha1_32(&p)
+ * sets the crypto_policy_t at location p to use policy
+ * AES_CM_256_HMAC_SHA1_32 as defined in
+ * draft-ietf-avt-srtp-big-aes-03.txt.  This policy uses AES-256
+ * Counter Mode encryption and HMAC-SHA1 authentication, with an
+ * authentication tag that is only 32 bits long.  This length is
+ * considered adequate only for protecting audio and video media that
+ * use a stateless playback function.  See Section 7.5 of RFC 3711
+ * (http://www.ietf.org/rfc/rfc3711.txt).
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @warning This crypto policy is intended for use in SRTP, but not in
+ * SRTCP.  It is recommended that a policy that uses longer
+ * authentication tags be used for SRTCP.  See Section 7.5 of RFC 3711
+ * (http://www.ietf.org/rfc/rfc3711.txt).
+ *
+ * @return void.
+ * 
+ */
+
+void
+crypto_policy_set_aes_cm_256_hmac_sha1_32(crypto_policy_t *p);
+
+/**
+ * @brief crypto_policy_set_aes_cm_256_null_auth() sets a crypto
+ * policy structure to an encryption-only policy
+ *
+ * @param p is a pointer to the policy structure to be set
+ *
+ * The function call crypto_policy_set_aes_cm_256_null_auth(&p) sets
+ * the crypto_policy_t at location p to use the SRTP default cipher
+ * (AES-256 Counter Mode), but to use no authentication method.  This
+ * policy is NOT RECOMMENDED unless it is unavoidable; see Section 7.5
+ * of RFC 3711 (http://www.ietf.org/rfc/rfc3711.txt).
+ *
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @warning This policy is NOT RECOMMENDED for SRTP unless it is
+ * unavoidable, and it is NOT RECOMMENDED at all for SRTCP; see
+ * Section 7.5 of RFC 3711 (http://www.ietf.org/rfc/rfc3711.txt).
+ *
+ * @return void.
+ *
+ */
+void
+crypto_policy_set_aes_cm_256_null_auth(crypto_policy_t *p);
+
+/**
+ * @brief crypto_policy_set_aes_gcm_128_8_auth() sets a crypto
+ * policy structure to an AEAD encryption policy.
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_aes_gcm_128_8_auth(&p) sets
+ * the crypto_policy_t at location p to use the SRTP default cipher
+ * (AES-128 Galois Counter Mode) with 8 octet auth tag.  This
+ * policy applies confidentiality and authentication to both the
+ * RTP and RTCP packets.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @return void.
+ * 
+ */
+void
+crypto_policy_set_aes_gcm_128_8_auth(crypto_policy_t *p);
+
+/**
+ * @brief crypto_policy_set_aes_gcm_256_8_auth() sets a crypto
+ * policy structure to an AEAD encryption policy
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_aes_gcm_256_8_auth(&p) sets
+ * the crypto_policy_t at location p to use the SRTP default cipher
+ * (AES-256 Galois Counter Mode) with 8 octet auth tag.  This 
+ * policy applies confidentiality and authentication to both the
+ * RTP and RTCP packets.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @return void.
+ * 
+ */
+void
+crypto_policy_set_aes_gcm_256_8_auth(crypto_policy_t *p);
+
+/**
+ * @brief crypto_policy_set_aes_gcm_128_8_only_auth() sets a crypto
+ * policy structure to an AEAD authentication-only policy
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_aes_gcm_128_8_only_auth(&p) sets
+ * the crypto_policy_t at location p to use the SRTP default cipher
+ * (AES-128 Galois Counter Mode) with 8 octet auth tag.  This policy 
+ * applies confidentiality and authentication to the RTP packets, 
+ * but only authentication to the RTCP packets.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @return void.
+ * 
+ */
+void
+crypto_policy_set_aes_gcm_128_8_only_auth(crypto_policy_t *p);
+
+/**
+ * @brief crypto_policy_set_aes_gcm_256_8_only_auth() sets a crypto
+ * policy structure to an AEAD authentication-only policy
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_aes_gcm_256_8_only_auth(&p) sets
+ * the crypto_policy_t at location p to use the SRTP default cipher
+ * (AES-256 Galois Counter Mode) with 8 octet auth tag.  This policy 
+ * applies confidentiality and authentication to the RTP packets, 
+ * but only authentication to the RTCP packets.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @return void.
+ * 
+ */
+void
+crypto_policy_set_aes_gcm_256_8_only_auth(crypto_policy_t *p);
+
+/**
+ * @brief crypto_policy_set_aes_gcm_128_16_auth() sets a crypto
+ * policy structure to an AEAD encryption policy.
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_aes_gcm_128_16_auth(&p) sets
+ * the crypto_policy_t at location p to use the SRTP default cipher
+ * (AES-128 Galois Counter Mode) with 16 octet auth tag.  This
+ * policy applies confidentiality and authentication to both the
+ * RTP and RTCP packets.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @return void.
+ * 
+ */
+void
+crypto_policy_set_aes_gcm_128_16_auth(crypto_policy_t *p);
+
+/**
+ * @brief crypto_policy_set_aes_gcm_256_16_auth() sets a crypto
+ * policy structure to an AEAD encryption policy
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_aes_gcm_256_16_auth(&p) sets
+ * the crypto_policy_t at location p to use the SRTP default cipher
+ * (AES-256 Galois Counter Mode) with 16 octet auth tag.  This 
+ * policy applies confidentiality and authentication to both the
+ * RTP and RTCP packets.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ *
+ * @return void.
+ * 
+ */
+void
+crypto_policy_set_aes_gcm_256_16_auth(crypto_policy_t *p);
+
+
 /**
  * @brief srtp_dealloc() deallocates storage for an SRTP session
  * context.
@@ -587,68 +870,112 @@ err_status_t
 srtp_dealloc(srtp_t s);
 
 
+/*
+ * @brief identifies a particular SRTP profile 
+ *
+ * An srtp_profile_t enumeration is used to identify a particular SRTP
+ * profile (that is, a set of algorithms and parameters).  These
+ * profiles are defined in the DTLS-SRTP draft.
+ */
+
+typedef enum {
+  srtp_profile_reserved           = 0,
+  srtp_profile_aes128_cm_sha1_80  = 1,
+  srtp_profile_aes128_cm_sha1_32  = 2,
+  srtp_profile_aes256_cm_sha1_80  = 3,
+  srtp_profile_aes256_cm_sha1_32  = 4,
+  srtp_profile_null_sha1_80       = 5,
+  srtp_profile_null_sha1_32       = 6,
+} srtp_profile_t;
+
+
+/**
+ * @brief crypto_policy_set_from_profile_for_rtp() sets a crypto policy
+ * structure to the appropriate value for RTP based on an srtp_profile_t
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_rtp_default(&policy, profile)
+ * sets the crypto_policy_t at location policy to the policy for RTP
+ * protection, as defined by the srtp_profile_t profile.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ * 
+ * @return values
+ *     - err_status_ok         no problems were encountered
+ *     - err_status_bad_param  the profile is not supported 
+ * 
+ */
+err_status_t
+crypto_policy_set_from_profile_for_rtp(crypto_policy_t *policy, 
+				       srtp_profile_t profile);
+
+
+
+
+/**
+ * @brief crypto_policy_set_from_profile_for_rtcp() sets a crypto policy
+ * structure to the appropriate value for RTCP based on an srtp_profile_t
+ *
+ * @param p is a pointer to the policy structure to be set 
+ * 
+ * The function call crypto_policy_set_rtcp_default(&policy, profile)
+ * sets the crypto_policy_t at location policy to the policy for RTCP
+ * protection, as defined by the srtp_profile_t profile.
+ * 
+ * This function is a convenience that helps to avoid dealing directly
+ * with the policy data structure.  You are encouraged to initialize
+ * policy elements with this function call.  Doing so may allow your
+ * code to be forward compatible with later versions of libSRTP that
+ * include more elements in the crypto_policy_t datatype.
+ * 
+ * @return values
+ *     - err_status_ok         no problems were encountered
+ *     - err_status_bad_param  the profile is not supported 
+ * 
+ */
+err_status_t
+crypto_policy_set_from_profile_for_rtcp(crypto_policy_t *policy, 
+				       srtp_profile_t profile);
+
+/**
+ * @brief returns the master key length for a given SRTP profile
+ */
+unsigned int
+srtp_profile_get_master_key_length(srtp_profile_t profile);
+
+
+/**
+ * @brief returns the master salt length for a given SRTP profile
+ */
+unsigned int
+srtp_profile_get_master_salt_length(srtp_profile_t profile);
+
+/**
+ * @brief appends the salt to the key
+ *
+ * The function call append_salt_to_key(k, klen, s, slen) 
+ * copies the string s to the location at klen bytes following
+ * the location k.  
+ *
+ * @warning There must be at least bytes_in_salt + bytes_in_key bytes
+ *          available at the location pointed to by key.
+ * 
+ */
+
+void
+append_salt_to_key(unsigned char *key, unsigned int bytes_in_key,
+		   unsigned char *salt, unsigned int bytes_in_salt);
+
+
 
 /**
  * @}
  */
-
-
-/*
- * the following declarations are libSRTP internal functions 
- */
-
-/*
- * srtp_get_stream(ssrc) returns a pointer to the stream corresponding
- * to ssrc, or NULL if no stream exists for that ssrc
- */
-
-srtp_stream_t 
-srtp_get_stream(srtp_t srtp, uint32_t ssrc);
-
-
-
-/*
- * libsrtp internal datatypes 
- */
-
-typedef enum direction_t { 
-  dir_unknown       = 0,
-  dir_srtp_sender   = 1, 
-  dir_srtp_receiver = 2
-} direction_t;
-
-/* 
- * an srtp_stream_t has its own SSRC, encryption key, authentication
- * key, sequence number, and replay database
- * 
- * note that the keys might not actually be unique, in which case the
- * cipher_t and auth_t pointers will point to the same structures
- */
-
-typedef struct srtp_stream_ctx_t {
-  uint32_t   ssrc;
-  cipher_t  *rtp_cipher;
-  auth_t    *rtp_auth;
-  rdbx_t     rtp_rdbx;
-  sec_serv_t rtp_services;
-  cipher_t  *rtcp_cipher;
-  auth_t    *rtcp_auth;
-  rdb_t      rtcp_rdb;
-  sec_serv_t rtcp_services;
-  key_limit_ctx_t *limit;
-  direction_t direction;
-  struct srtp_stream_ctx_t *next;   /* linked list of streams */
-} srtp_stream_ctx_t;
-
-
-/*
- * an srtp_ctx_t holds a stream list and a service description
- */
-
-typedef struct srtp_ctx_t {
-  srtp_stream_ctx_t *stream_list;     /* linked list of streams            */
-  srtp_stream_ctx_t *stream_template; /* act as template for other streams */
-} srtp_ctx_t;
 
 
 
@@ -687,6 +1014,11 @@ typedef struct srtp_ctx_t {
  * packet, and assumes that the RTCP packet is aligned on a 32-bit
  * boundary.
  *
+ * @warning This function assumes that it can write SRTP_MAX_TRAILER_LEN+4 
+ * into the location in memory immediately following the RTCP packet.   
+ * Callers MUST ensure that this much writable memory is available in 
+ * the buffer that holds the RTCP packet.
+ * 
  * @param ctx is the SRTP context to use in processing the packet.
  *
  * @param rtcp_hdr is a pointer to the RTCP packet (before the call); after
@@ -857,123 +1189,6 @@ srtp_install_event_handler(srtp_event_handler_func_t func);
 /**
  * @}
  */
-
-/*
- * srtp_handle_event(srtp, srtm, evnt) calls the event handling
- * function, if there is one.
- *
- * This macro is not included in the documentation as it is 
- * an internal-only function.
- */
-
-#define srtp_handle_event(srtp, strm, evnt)         \
-   if(srtp_event_handler) {                         \
-      srtp_event_data_t data;                       \
-      data.session = srtp;                          \
-      data.stream  = strm;                          \
-      data.event   = evnt;                          \
-      srtp_event_handler(&data);                    \
-}   
-
-/*
- * an srtp_hdr_t represents the srtp header
- *
- * in this implementation, an srtp_hdr_t is assumed to be 32-bit aligned
- * 
- * (note that this definition follows that of RFC 1889 Appendix A, but
- * is not identical)
- */
- 
-#ifndef WORDS_BIGENDIAN
-
-typedef struct {
-  unsigned cc:4;	/* CSRC count             */
-  unsigned x:1;		/* header extension flag  */
-  unsigned p:1;		/* padding flag           */
-  unsigned version:2;	/* protocol version       */
-  unsigned pt:7;	/* payload type           */
-  unsigned m:1;		/* marker bit             */
-  uint16_t seq;		/* sequence number        */
-  uint32_t ts;		/* timestamp              */
-  uint32_t ssrc;	/* synchronization source */
-} srtp_hdr_t;
-
-#else /*  BIG_ENDIAN */
-
-typedef struct {
-  unsigned version:2;	/* protocol version       */
-  unsigned p:1;		/* padding flag           */
-  unsigned x:1;		/* header extension flag  */
-  unsigned cc:4;	/* CSRC count             */
-  unsigned m:1;		/* marker bit             */
-  unsigned pt:7;	/* payload type           */
-  uint16_t seq;		/* sequence number        */
-  uint32_t ts;		/* timestamp              */
-  uint32_t ssrc;	/* synchronization source */
-} srtp_hdr_t;
-
-#endif
-
-typedef struct {
-  uint16_t profile_specific;    /* profile-specific info               */
-  uint16_t length;              /* number of 32-bit words in extension */
-} srtp_hdr_xtnd_t;
-
-
-/*
- * srtcp_hdr_t represents a secure rtcp header 
- *
- * in this implementation, an srtcp header is assumed to be 32-bit
- * alinged
- */
-
-#ifndef WORDS_BIGENDIAN
-
-typedef struct {
-  unsigned char rc:5;		/* reception report count */
-  unsigned char p:1;		/* padding flag           */
-  unsigned char version:2;	/* protocol version       */
-  unsigned char pt:8;		/* payload type           */
-  uint16_t len;			/* length                 */
-  uint32_t ssrc;	       	/* synchronization source */
-} srtcp_hdr_t;
-
-typedef struct {
-  unsigned int index:31;    /* srtcp packet index in network order! */
-  unsigned int e:1;         /* encrypted? 1=yes */
-  /* optional mikey/etc go here */
-  /* and then the variable-length auth tag */
-} srtcp_trailer_t;
-
-
-#else /*  BIG_ENDIAN */
-
-typedef struct {
-  unsigned char version:2;	/* protocol version       */
-  unsigned char p:1;		/* padding flag           */
-  unsigned char rc:5;		/* reception report count */
-  unsigned char pt:8;		/* payload type           */
-  uint16_t len;			/* length                 */
-  uint32_t ssrc;	       	/* synchronization source */
-} srtcp_hdr_t;
-
-typedef struct {
-  unsigned int version:2;  /* protocol version                     */
-  unsigned int p:1;        /* padding flag                         */
-  unsigned int count:5;    /* varies by packet type                */
-  unsigned int pt:8;       /* payload type                         */
-  uint16_t length;         /* len of uint32s of packet less header */
-} rtcp_common_t;
-
-typedef struct {
-  unsigned int e:1;         /* encrypted? 1=yes */
-  unsigned int index:31;    /* srtcp packet index */
-  /* optional mikey/etc go here */
-  /* and then the variable-length auth tag */
-} srtcp_trailer_t;
-
-#endif
-
 /* in host order, so outside the #if */
 #define SRTCP_E_BIT      0x80000000
 /* for byte-access */

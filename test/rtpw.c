@@ -16,7 +16,7 @@
 
 /*
  *	
- * Copyright (c) 2001-2005, Cisco Systems, Inc.
+ * Copyright (c) 2001-2006, Cisco Systems, Inc.
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -52,13 +52,19 @@
 
 
 #include "datatypes.h"
+#include "getopt_s.h"       /* for local getopt()  */
 
 #include <stdio.h>          /* for printf, fprintf */
 #include <stdlib.h>         /* for atoi()          */
 #include <errno.h>
-#include <unistd.h>         /* for close()         */
+#include <signal.h>         /* for signal()        */
+
 #include <string.h>         /* for strncpy()       */
 #include <time.h>	    /* for usleep()        */
+
+#ifdef HAVE_UNISTD_H
+#include <unistd.h>         /* for close()         */
+#endif
 #ifdef HAVE_SYS_SOCKET_H
 # include <sys/socket.h>
 #endif
@@ -84,8 +90,7 @@
 #define USEC_RATE        (5e5)
 #define MAX_WORD_LEN     128  
 #define ADDR_IS_MULTICAST(a) IN_MULTICAST(htonl(a))
-#define MAX_KEY_LEN      64
-#define MASTER_KEY_LEN   30
+#define MAX_KEY_LEN      96
 
 
 #ifndef HAVE_USLEEP
@@ -114,6 +119,18 @@ leave_group(int sock, struct ip_mreq mreq, char *name);
 
 
 /*
+ * setup_signal_handler() sets up a signal handler to trigger
+ * cleanups after an interrupt
+ */
+int setup_signal_handler(char* name);
+
+/*
+ * handle_signal(...) handles interrupt signal to trigger cleanups
+ */
+
+volatile int interrupted = 0;
+
+/*
  * program_type distinguishes the [s]rtp sender and receiver cases
  */
 
@@ -135,6 +152,9 @@ main (int argc, char *argv[]) {
   sec_serv_t sec_servs = sec_serv_none;
   unsigned char ttl = 5;
   int c;
+  int key_size = 128;
+  int tag_size = 8;
+  int gcm_on = 0;
   char *input_key = NULL;
   char *address = NULL;
   char key[MAX_KEY_LEN];
@@ -156,6 +176,10 @@ main (int argc, char *argv[]) {
   }
 #endif
 
+  if (setup_signal_handler(argv[0]) != 0) {
+    exit(1);
+  }
+
   /* initialize srtp library */
   status = srtp_init();
   if (status) {
@@ -165,18 +189,34 @@ main (int argc, char *argv[]) {
 
   /* check args */
   while (1) {
-    c = getopt(argc, argv, "k:rsaeld:");
+    c = getopt_s(argc, argv, "k:rsgt:ae:ld:");
     if (c == -1) {
       break;
     }
     switch (c) {
     case 'k':
-      input_key = optarg;
+      input_key = optarg_s;
       break;
     case 'e':
+      key_size = atoi(optarg_s);
+      if (key_size != 128 && key_size != 256) {
+        printf("error: encryption key size must be 128 or 256 (%d)\n", key_size);
+        exit(1);
+      }
       sec_servs |= sec_serv_conf;
       break;
+    case 't':
+      tag_size = atoi(optarg_s);
+      if (tag_size != 8 && tag_size != 16) {
+        printf("error: GCM tag size must be 8 or 16 (%d)\n", tag_size);
+        exit(1);
+      }
+      break;
     case 'a':
+      sec_servs |= sec_serv_auth;
+      break;
+    case 'g':
+      gcm_on = 1;
       sec_servs |= sec_serv_auth;
       break;
     case 'r':
@@ -186,9 +226,9 @@ main (int argc, char *argv[]) {
       prog_type = sender;
       break;
     case 'd':
-      status = crypto_kernel_set_debug_module(optarg, 1);
+      status = crypto_kernel_set_debug_module(optarg_s, 1);
       if (status) {
-        printf("error: set debug module (%s) failed\n", optarg);
+        printf("error: set debug module (%s) failed\n", optarg_s);
         exit(1);
       }
       break;
@@ -222,16 +262,16 @@ main (int argc, char *argv[]) {
     usage(argv[0]);
   }
     
-  if (argc != optind + 2) {
+  if (argc != optind_s + 2) {
     /* wrong number of arguments */
     usage(argv[0]);
   }
 
   /* get address from arg */
-  address = argv[optind++];
+  address = argv[optind_s++];
 
   /* get port from arg */
-  port = atoi(argv[optind++]);
+  port = atoi(argv[optind_s++]);
 
   /* set address */
 #ifdef HAVE_INET_ATON
@@ -261,7 +301,7 @@ main (int argc, char *argv[]) {
     err = errno;
 #endif
     fprintf(stderr, "%s: couldn't open socket: %d\n", argv[0], err);
-    exit(1);
+   exit(1);
   }
 
   name.sin_addr   = rcvr_addr;    
@@ -309,16 +349,73 @@ main (int argc, char *argv[]) {
      */
     switch (sec_servs) {
     case sec_serv_conf_and_auth:
-      crypto_policy_set_rtp_default(&policy.rtp);
-      crypto_policy_set_rtcp_default(&policy.rtcp);
+      if (gcm_on) {
+#ifdef OPENSSL
+	switch (key_size) {
+	case 128:
+	  crypto_policy_set_aes_gcm_128_8_auth(&policy.rtp);
+	  crypto_policy_set_aes_gcm_128_8_auth(&policy.rtcp);
+	  break;
+	case 256:
+	  crypto_policy_set_aes_gcm_256_8_auth(&policy.rtp);
+	  crypto_policy_set_aes_gcm_256_8_auth(&policy.rtcp);
+	  break;
+	}
+#else
+	printf("error: GCM mode only supported when using the OpenSSL crypto engine.\n");
+	return 0;
+#endif
+      } else {
+	switch (key_size) {
+	case 128:
+          crypto_policy_set_rtp_default(&policy.rtp);
+          crypto_policy_set_rtcp_default(&policy.rtcp);
+	  break;
+	case 256:
+          crypto_policy_set_aes_cm_256_hmac_sha1_80(&policy.rtp);
+          crypto_policy_set_rtcp_default(&policy.rtcp);
+	  break;
+	}
+      }
       break;
     case sec_serv_conf:
-      crypto_policy_set_aes_cm_128_null_auth(&policy.rtp);
-      crypto_policy_set_rtcp_default(&policy.rtcp);      
+      if (gcm_on) {
+	  printf("error: GCM mode must always be used with auth enabled\n");
+	  return -1;
+      } else {
+	switch (key_size) {
+	case 128:
+          crypto_policy_set_aes_cm_128_null_auth(&policy.rtp);
+          crypto_policy_set_rtcp_default(&policy.rtcp);      
+	  break;
+	case 256:
+          crypto_policy_set_aes_cm_256_null_auth(&policy.rtp);
+          crypto_policy_set_rtcp_default(&policy.rtcp);      
+	  break;
+	}
+      }
       break;
     case sec_serv_auth:
-      crypto_policy_set_null_cipher_hmac_sha1_80(&policy.rtp);
-      crypto_policy_set_rtcp_default(&policy.rtcp);
+      if (gcm_on) {
+#ifdef OPENSSL
+	switch (key_size) {
+	case 128:
+	  crypto_policy_set_aes_gcm_128_8_only_auth(&policy.rtp);
+	  crypto_policy_set_aes_gcm_128_8_only_auth(&policy.rtcp);
+	  break;
+	case 256:
+	  crypto_policy_set_aes_gcm_256_8_only_auth(&policy.rtp);
+	  crypto_policy_set_aes_gcm_256_8_only_auth(&policy.rtcp);
+	  break;
+	}
+#else
+	printf("error: GCM mode only supported when using the OpenSSL crypto engine.\n");
+	return 0;
+#endif
+      } else {
+        crypto_policy_set_null_cipher_hmac_sha1_80(&policy.rtp);
+        crypto_policy_set_rtcp_default(&policy.rtcp);
+      }
       break;
     default:
       printf("error: unknown security service requested\n");
@@ -327,28 +424,35 @@ main (int argc, char *argv[]) {
     policy.ssrc.type  = ssrc_specific;
     policy.ssrc.value = ssrc;
     policy.key  = (uint8_t *) key;
+    policy.ekt  = NULL;
     policy.next = NULL;
+    policy.window_size = 128;
+    policy.allow_repeat_tx = 0;
     policy.rtp.sec_serv = sec_servs;
     policy.rtcp.sec_serv = sec_serv_none;  /* we don't do RTCP anyway */
+
+    if (gcm_on && tag_size != 8) {
+	policy.rtp.auth_tag_len = tag_size;
+    }
 
     /*
      * read key from hexadecimal on command line into an octet string
      */
-    len = hex_string_to_octet_string(key, input_key, MASTER_KEY_LEN*2);
+    len = hex_string_to_octet_string(key, input_key, policy.rtp.cipher_key_len*2);
     
     /* check that hex string is the right length */
-    if (len < MASTER_KEY_LEN*2) {
+    if (len < policy.rtp.cipher_key_len*2) {
       fprintf(stderr, 
 	      "error: too few digits in key/salt "
 	      "(should be %d hexadecimal digits, found %d)\n",
-	      MASTER_KEY_LEN*2, len);
+	      policy.rtp.cipher_key_len*2, len);
       exit(1);    
     } 
-    if (strlen(input_key) > MASTER_KEY_LEN*2) {
+    if (strlen(input_key) > policy.rtp.cipher_key_len*2) {
       fprintf(stderr, 
 	      "error: too many digits in key/salt "
 	      "(should be %d hexadecimal digits, found %u)\n",
-	      MASTER_KEY_LEN*2, (unsigned)strlen(input_key));
+	      policy.rtp.cipher_key_len*2, (unsigned)strlen(input_key));
       exit(1);    
     }
     
@@ -380,6 +484,9 @@ main (int argc, char *argv[]) {
     policy.rtcp.auth_key_len   = 0;
     policy.rtcp.auth_tag_len   = 0;
     policy.rtcp.sec_serv       = sec_serv_none;   
+    policy.window_size         = 0;
+    policy.allow_repeat_tx     = 0;
+    policy.ekt                 = NULL;
     policy.next                = NULL;
   }
 
@@ -399,8 +506,13 @@ main (int argc, char *argv[]) {
 #endif /* BEW */
 
     /* initialize sender's rtp and srtp contexts */
-    rtp_sender_init(&snd, sock, name, ssrc); 
-    status = srtp_create(&snd.srtp_ctx, &policy);
+    snd = rtp_sender_alloc();
+    if (snd == NULL) {
+      fprintf(stderr, "error: malloc() failed\n");
+      exit(1);
+    }
+    rtp_sender_init(snd, sock, name, ssrc); 
+    status = rtp_sender_init_srtp(snd, &policy);
     if (status) {
       fprintf(stderr, 
 	      "error: srtp_create() failed with code %d\n", 
@@ -419,18 +531,22 @@ main (int argc, char *argv[]) {
     }
           
     /* read words from dictionary, then send them off */
-    while (fgets(word, MAX_WORD_LEN, dict) != NULL) { 
+    while (!interrupted && fgets(word, MAX_WORD_LEN, dict) != NULL) { 
       len = strlen(word) + 1;  /* plus one for null */
       
       if (len > MAX_WORD_LEN) 
 	printf("error: word %s too large to send\n", word);
       else {
-	rtp_sendto(&snd, word, len);
+	rtp_sendto(snd, word, len);
         printf("sending word: %s", word);
       }
       usleep(USEC_RATE);
     }
-    
+
+    rtp_sender_deinit_srtp(snd);
+    rtp_sender_dealloc(snd);
+
+    fclose(dict);
   } else  { /* prog_type == receiver */
     rtp_receiver_t rcvr;
         
@@ -444,8 +560,13 @@ main (int argc, char *argv[]) {
       exit(1);
     }
 
-    rtp_receiver_init(&rcvr, sock, name, ssrc);
-    status = srtp_create(&rcvr.srtp_ctx, &policy);
+    rcvr = rtp_receiver_alloc();
+    if (rcvr == NULL) {
+      fprintf(stderr, "error: malloc() failed\n");
+      exit(1);
+    }
+    rtp_receiver_init(rcvr, sock, name, ssrc);
+    status = rtp_receiver_init_srtp(rcvr, &policy);
     if (status) {
       fprintf(stderr, 
 	      "error: srtp_create() failed with code %d\n", 
@@ -454,16 +575,34 @@ main (int argc, char *argv[]) {
     }
 
     /* get next word and loop */
-    while (1) {
+    while (!interrupted) {
       len = MAX_WORD_LEN;
-      if (rtp_recvfrom(&rcvr, word, &len) > -1)
-	printf("\tword: %s", word);
+      if (rtp_recvfrom(rcvr, word, &len) > -1)
+	printf("\tword: %s\n", word);
     }
       
+    rtp_receiver_deinit_srtp(rcvr);
+    rtp_receiver_dealloc(rcvr);
   } 
 
   if (ADDR_IS_MULTICAST(rcvr_addr.s_addr)) {
     leave_group(sock, mreq, argv[0]);
+  }
+
+#ifdef RTPW_USE_WINSOCK2
+  ret = closesocket(sock);
+#else
+  ret = close(sock);
+#endif
+  if (ret < 0) {
+    fprintf(stderr, "%s: Failed to close socket", argv[0]);
+    perror("");
+  }
+
+  status = srtp_shutdown();
+  if (status) {
+    printf("error: srtp shutdown failed with error code %d\n", status);
+    exit(1);
   }
 
 #ifdef RTPW_USE_WINSOCK2
@@ -481,7 +620,9 @@ usage(char *string) {
 	 "[-s | -r] dest_ip dest_port\n"
 	 "or     %s -l\n"
 	 "where  -a use message authentication\n"
-	 "       -e use encryption\n"
+	 "       -e <key size> use encryption (use 128 or 256 for key size)\n"
+	 "       -g Use AES-GCM mode (must be used with -e)\n"
+	 "       -t <tag size> Tag size to use in GCM mode (use 8 or 16)\n"
 	 "       -k <key>  sets the srtp master key\n"
 	 "       -s act as rtp sender\n"
 	 "       -r act as rtp receiver\n"
@@ -505,3 +646,41 @@ leave_group(int sock, struct ip_mreq mreq, char *name) {
   }
 }
 
+void handle_signal(int signum)
+{
+  interrupted = 1;
+  /* Reset handler explicitly, in case we don't have sigaction() (and signal()
+     has BSD semantics), or we don't have SA_RESETHAND */
+  signal(signum, SIG_DFL);
+}
+
+int setup_signal_handler(char* name)
+{
+#if HAVE_SIGACTION
+  struct sigaction act;
+  memset(&act, 0, sizeof(act));
+
+  act.sa_handler = handle_signal;
+  sigemptyset(&act.sa_mask);
+#if defined(SA_RESETHAND)
+  act.sa_flags = SA_RESETHAND;
+#else
+  act.sa_flags = 0;
+#endif
+  /* Note that we're not setting SA_RESTART; we want recvfrom to return
+   * EINTR when we signal the receiver. */
+  
+  if (sigaction(SIGTERM, &act, NULL) != 0) {
+    fprintf(stderr, "%s: error setting up signal handler", name);
+    perror("");
+    return -1;
+  }
+#else
+  if (signal(SIGTERM, handle_signal) == SIG_ERR) {
+    fprintf(stderr, "%s: error setting up signal handler", name);
+    perror("");
+    return -1;
+  }
+#endif
+  return 0;
+}

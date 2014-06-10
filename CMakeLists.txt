@@ -9,6 +9,7 @@ option(ERROR_TO_FILE "Report errors to file instead of stderr" OFF)
 option(ENABLE_GENERIC_AESICM "Enable generic AES ICM" OFF)
 option(BUILD_FOR_RISK "Build for RISK cpu type" OFF)
 option(SYSLOG_LOGGING "Enable syslog logging" OFF)
+option(WITH_OPENSSL "Enable building with openssl" ON)
 
 # -- start of checks
 
@@ -107,6 +108,14 @@ if(${NON_CONST_ANSI_CONFORM})
 	set(CONST_WHAT "")
 endif()
 
+# check if openssl exists
+if(${WITH_OPENSSL})
+	find_package(OpenSSL)
+	if(NOT ${OPENSSL_FOUND})
+		message(STATUS "OpenSSL was not found.. will continue WITHOUT_OPENSSL")
+	endif()
+endif()
+
 if(MSVC)
 	set(inline 1)
 	set(INLINE_KEYWORD "_inline")
@@ -129,11 +138,12 @@ configure_file(config.h.cmake.in
 	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h")
 
 # ---- End of checks
-set(libtype STATIC)
-#set(libtype SHARED)
+#set(libtype STATIC)
+set(libtype SHARED)
 
 set(src
 	"srtp/srtp.c"
+	"srtp/ekt.c"
 	"crypto/kernel/alloc.c"
 	"crypto/hash/auth.c"
 	"crypto/kernel/err.c"
@@ -143,36 +153,59 @@ set(src
 	"crypto/kernel/key.c"
 	"crypto/replay/rdbx.c"
 	"crypto/replay/rdb.c"
-	"crypto/cipher/aes_icm.c"
 	"crypto/math/stat.c"
 	"crypto/rng/ctr_prng.c"
 	"crypto/cipher/aes_cbc.c"
 	"crypto/cipher/null_cipher.c"
 	"crypto/hash/null_auth.c"
-	"crypto/hash/hmac.c"
+	
 	"crypto/cipher/aes.c"
-	"crypto/hash/sha1.c"
 	)
-
-# determine linux
-if(LINUX)
-	list(APPEND src "crypto/rng/rand_linux_kernel.c")
-else()
-	list(APPEND src "crypto/rng/rand_source.c")
-endif()
 
 set(internal_hdrs
 	"include/srtp/crypto/alloc.h"
+	"include/srtp/ekt.h"
+	"include/srtp/getopt_s.h"
+	"include/srtp/inttypes.h"
+	"include/srtp/rtp_priv.h"
+	"include/srtp/srtp_priv.h"
+	"include/srtp/stdint.h"
 	"include/srtp/crypto/crypto_kernel.h"
 	"include/srtp/crypto/auth.h"
 	"include/srtp/crypto/err.h"
 	"include/srtp/crypto/datatypes.h"
 	"include/srtp/crypto/aes.h"
+	"include/srtp/crypto/integers.h"
 	"include/srtp/crypto/aes_cbc.h"
 	"include/srtp/crypto/aes_icm.h"
-	"include/srtp/crypto/integers.h"
 	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h"
 	)
+
+if(OPENSSL_FOUND)
+	list(APPEND src "crypto/cipher/aes_gcm_ossl.c")
+	list(APPEND src "crypto/cipher/aes_icm_ossl.c")
+	list(APPEND src "crypto/hash/hmac_ossl.c")
+	list(APPEND src "crypto/rng/rand_source_ossl.c")
+
+	list(APPEND internal_hdrs "include/srtp/crypto/aes_gcm_ossl.h")
+	list(APPEND internal_hdrs "include/srtp/crypto/aes_icm_ossl.h")
+
+	list(APPEND include_dirs ${OPENSSL_INCLUDE_DIR})
+	list(APPEND otherlibs ${OPENSSL_LIBRARIES})
+	list(APPEND definitions "OPENSSL")
+else()
+	# without openssl
+	list(APPEND src "crypto/cipher/aes_icm.c")
+	list(APPEND src "crypto/hash/sha1.c")
+	list(APPEND src "crypto/hash/hmac.c")
+
+	# determine os random source
+	if(LINUX)
+		list(APPEND src "crypto/rng/rand_linux_kernel.c")
+	else()
+		list(APPEND src "crypto/rng/rand_source.c")
+	endif()
+endif()
 
 set(hdrs
 	"include/srtp/srtp.h")
