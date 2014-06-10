@@ -138,8 +138,8 @@ configure_file(config.h.cmake.in
 	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h")
 
 # ---- End of checks
-#set(libtype STATIC)
-set(libtype SHARED)
+set(libtype STATIC)
+#set(libtype SHARED)
 
 set(src
 	"srtp/srtp.c"
