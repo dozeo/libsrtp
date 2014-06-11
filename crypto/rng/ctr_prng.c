@@ -42,6 +42,9 @@
  *
  */
 
+#if _MSC_VER
+#pragma warning(disable:4013)
+#endif
 
 #include "srtp/crypto/prng.h"
 
