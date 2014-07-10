@@ -158,7 +158,6 @@ set(src
 	"crypto/cipher/aes_cbc.c"
 	"crypto/cipher/null_cipher.c"
 	"crypto/hash/null_auth.c"
-	
 	"crypto/cipher/aes.c"
 	)
 
@@ -229,6 +228,7 @@ endif()
 
 set_target_properties(${libname} PROPERTIES 
 	INCLUDE_DIRECTORIES "${include_dirs}"
+	INTERFACE_INCLUDE_DIRECTORIES "${include_dirs}"
 	COMPILE_DEFINITIONS "${definitions}"
 	PREFIX ""
 )
