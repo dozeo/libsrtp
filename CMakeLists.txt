@@ -10,6 +10,7 @@ option(ENABLE_GENERIC_AESICM "Enable generic AES ICM" OFF)
 option(BUILD_FOR_RISK "Build for RISK cpu type" OFF)
 option(SYSLOG_LOGGING "Enable syslog logging" OFF)
 option(WITH_OPENSSL "Enable building with openssl" ON)
+option(BUILD_SHARED_LIB "Enable building of shared library instead of the static" OFF)
 
 # -- start of checks
 
@@ -138,7 +139,16 @@ configure_file(config.h.cmake.in
 	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h")
 
 # ---- End of checks
-set(libtype STATIC)
+if (BUILD_SHARED_LIB)
+	set(libtype SHARED)
+	if(WIN32)
+		set(pclibs "-lsrtp.dll")
+	endif()
+#	list(APPEND definitions "EXPORT_DLL")
+else()
+	set(libtype STATIC)
+	set(pclibs "-lsrtp")
+endif()
 #set(libtype SHARED)
 
 set(src
@@ -161,7 +171,10 @@ set(src
 	"crypto/cipher/aes.c"
 	)
 
-set(internal_hdrs
+set(config_header
+	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h")
+
+set(hdrs
 	"include/srtp/crypto/alloc.h"
 	"include/srtp/ekt.h"
 	"include/srtp/getopt_s.h"
@@ -177,7 +190,7 @@ set(internal_hdrs
 	"include/srtp/crypto/integers.h"
 	"include/srtp/crypto/aes_cbc.h"
 	"include/srtp/crypto/aes_icm.h"
-	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h"
+	"${config_header}"
 	)
 
 if(OPENSSL_FOUND)
@@ -186,12 +199,15 @@ if(OPENSSL_FOUND)
 	list(APPEND src "crypto/hash/hmac_ossl.c")
 	list(APPEND src "crypto/rng/rand_source_ossl.c")
 
-	list(APPEND internal_hdrs "include/srtp/crypto/aes_gcm_ossl.h")
-	list(APPEND internal_hdrs "include/srtp/crypto/aes_icm_ossl.h")
+	list(APPEND hdrs "include/srtp/crypto/aes_gcm_ossl.h")
+	list(APPEND hdrs "include/srtp/crypto/aes_icm_ossl.h")
 
 	list(APPEND include_dirs ${OPENSSL_INCLUDE_DIR})
 	list(APPEND otherlibs ${OPENSSL_LIBRARIES})
 	list(APPEND definitions "OPENSSL")
+
+	# TODO: Add openssl to pkgconfig output
+	#set(pclibs "{pclibs} ${OPENSSL_LIBRARIES}")
 else()
 	# without openssl
 	list(APPEND src "crypto/cipher/aes_icm.c")
@@ -206,7 +222,7 @@ else()
 	endif()
 endif()
 
-set(hdrs
+list(APPEND hdrs
 	"include/srtp/srtp.h")
 
 list(APPEND include_dirs "${CMAKE_CURRENT_BINARY_DIR}/include")
@@ -214,23 +230,41 @@ list(APPEND include_dirs "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 if(WIN32)
 	list(APPEND platformlibs "wsock32.lib" "ws2_32.lib")
+	if (NOT BUILD_SHARED_LIB)
+		set(pclibs "${pclibs} -lwsock32")
+	endif()
 endif()
 
 list(APPEND libraries "${platformlibs}" "${otherlibs}")
 list(APPEND definitions "SOME_DEFINES")
 
-add_library(${libname} ${libtype} ${src} ${hdrs} ${internal_hdrs})
+add_library(${libname} ${libtype} ${src} ${hdrs})
 
 if(MSVC)
 	set_target_properties(${libname} PROPERTIES
 		COMPILE_FLAGS "/wd4018 /wd4244")
+else()
+	configure_file(libsrtp.pc.in ${CMAKE_INSTALL_PREFIX}/lib/pkgconfig/libsrtp.pc
+		@ONLY)
 endif()
 
 set_target_properties(${libname} PROPERTIES 
+	PUBLIC_HEADER "${config_header}"
 	INCLUDE_DIRECTORIES "${include_dirs}"
 	INTERFACE_INCLUDE_DIRECTORIES "${include_dirs}"
 	COMPILE_DEFINITIONS "${definitions}"
 	PREFIX ""
+	IMPORT_PREFIX ""
 )
 
+install(DIRECTORY include/ DESTINATION include
+	FILES_MATCHING PATTERN "*.h")
+
 target_link_libraries(${libname} ${libraries})
+
+install(TARGETS ${libname}
+	# EXPORT libname
+	PUBLIC_HEADER DESTINATION include/srtp COMPONENT dev
+	LIBRARY DESTINATION lib COMPONENT lib
+	ARCHIVE DESTINATION lib COMPONENT lib
+	RUNTIME DESTINATION bin COMPONENT lib)
