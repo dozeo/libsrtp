@@ -244,8 +244,10 @@ if(MSVC)
 	set_target_properties(${libname} PROPERTIES
 		COMPILE_FLAGS "/wd4018 /wd4244")
 else()
-	configure_file(libsrtp.pc.in ${CMAKE_INSTALL_PREFIX}/lib/pkgconfig/libsrtp.pc
+	configure_file(libsrtp.pc.in ${CMAKE_BINARY_DIR}/libsrtp.pc
 		@ONLY)
+	install(FILES "${CMAKE_BINARY_DIR}/libsrtp.pc"
+		DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig")
 endif()
 
 set_target_properties(${libname} PROPERTIES 
