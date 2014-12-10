@@ -9,8 +9,10 @@ option(ERROR_TO_FILE "Report errors to file instead of stderr" OFF)
 option(ENABLE_GENERIC_AESICM "Enable generic AES ICM" OFF)
 option(BUILD_FOR_RISK "Build for RISK cpu type" OFF)
 option(SYSLOG_LOGGING "Enable syslog logging" OFF)
-option(WITH_OPENSSL "Enable building with openssl" ON)
-option(BUILD_SHARED_LIB "Enable building of shared library instead of the static" OFF)
+
+option(LIBSRTP_WITH_OPENSSL "Enable building with openssl" ON)
+option(LIBSRTP_BUILD_SHARED_LIB "Enable building of shared library instead of the static" OFF)
+option(LIBSRTP_INSTALL_TARGET "Should generate install instructions" ON)
 
 # -- start of checks
 
@@ -110,7 +112,7 @@ if(${NON_CONST_ANSI_CONFORM})
 endif()
 
 # check if openssl exists
-if(${WITH_OPENSSL})
+if(${LIBSRTP_WITH_OPENSSL})
 	find_package(OpenSSL)
 	if(NOT ${OPENSSL_FOUND})
 		message(STATUS "OpenSSL was not found.. will continue WITHOUT_OPENSSL")
@@ -139,7 +141,7 @@ configure_file(config.h.cmake.in
 	"${CMAKE_CURRENT_BINARY_DIR}/include/srtp/config.h")
 
 # ---- End of checks
-if (BUILD_SHARED_LIB)
+if (LIBSRTP_BUILD_SHARED_LIB)
 	set(libtype SHARED)
 	if(WIN32)
 		set(pclibs "-lsrtp.dll")
@@ -230,7 +232,7 @@ list(APPEND include_dirs "${CMAKE_CURRENT_SOURCE_DIR}/include")
 
 if(WIN32)
 	list(APPEND platformlibs "wsock32.lib" "ws2_32.lib")
-	if (NOT BUILD_SHARED_LIB)
+	if (NOT LIBSRTP_BUILD_SHARED_LIB)
 		set(pclibs "${pclibs} -lwsock32")
 	endif()
 endif()
@@ -246,8 +248,10 @@ if(MSVC)
 else()
 	configure_file(libsrtp.pc.in ${CMAKE_BINARY_DIR}/libsrtp.pc
 		@ONLY)
-	install(FILES "${CMAKE_BINARY_DIR}/libsrtp.pc"
-		DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig")
+	if(LIBSRTP_INSTALL_TARGET)
+		install(FILES "${CMAKE_BINARY_DIR}/libsrtp.pc"
+			DESTINATION "${CMAKE_INSTALL_PREFIX}/lib/pkgconfig")
+	endif()
 endif()
 
 set_target_properties(${libname} PROPERTIES 
@@ -259,14 +263,18 @@ set_target_properties(${libname} PROPERTIES
 	IMPORT_PREFIX ""
 )
 
-install(DIRECTORY include/ DESTINATION include
-	FILES_MATCHING PATTERN "*.h")
+if(LIBSRTP_INSTALL_TARGET)
+	install(DIRECTORY include/ DESTINATION include
+		FILES_MATCHING PATTERN "*.h")
+endif()
 
 target_link_libraries(${libname} ${libraries})
 
-install(TARGETS ${libname}
-	# EXPORT libname
-	PUBLIC_HEADER DESTINATION include/srtp COMPONENT dev
-	LIBRARY DESTINATION lib COMPONENT lib
-	ARCHIVE DESTINATION lib COMPONENT lib
-	RUNTIME DESTINATION bin COMPONENT lib)
+if(LIBSRTP_INSTALL_TARGET)
+	install(TARGETS ${libname}
+		# EXPORT libname
+		PUBLIC_HEADER DESTINATION include/srtp COMPONENT dev
+		LIBRARY DESTINATION lib COMPONENT lib
+		ARCHIVE DESTINATION lib COMPONENT lib
+		RUNTIME DESTINATION bin COMPONENT lib)
+endif()
